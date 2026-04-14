@@ -1,10 +1,10 @@
 {
-  "name": "backend",
+  "name": "feud-frenzy",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "Web based Family Feud type game",
+  "author": "Efemena Esegbue",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -17,14 +17,21 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "migration:create": "ts-node --transpile-only typeorm migration:create src/migrations/$npm_config.name -d src/datasource.ts",
+    "migration:generate": "ts-node --transpile-only typeorm migration:generate src/migrations/$npm_config.name -d src/datasource.ts",
+    "migration:run": "ts-node --transpile-only typeorm migration:run -d src/datasource.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/typeorm": "^11.0.1",
+    "dotenv": "^17.4.2",
+    "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "typeorm": "^0.3.28"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
