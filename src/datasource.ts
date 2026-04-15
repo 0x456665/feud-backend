@@ -3,7 +3,7 @@ import { config } from 'dotenv';
 
 config(); // Load environment variables from .env file
 
-export const AppDataSource = new DataSource({
+const AppDataSource = new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST,
   ssl: process.env.DB_SSL === 'true',
