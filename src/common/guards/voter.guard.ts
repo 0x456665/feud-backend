@@ -32,37 +32,47 @@ export class VoterGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
 
-    // The cookie is set server-side when the player joins the game
-    const cookieToken: string | undefined = request.cookies?.voter_token;
+    // Use an existing voter_token cookie, or generate a fresh one that the
+    // castVote handler will persist in the response cookie (first-time voters).
+    let cookieToken: string | undefined = request.cookies?.voter_token as string | undefined;
     if (!cookieToken) {
-      throw new ForbiddenException(
-        'You must join the game before voting (missing voter_token cookie)',
-      );
+      const { randomUUID } = await import('crypto');
+      cookieToken = randomUUID();
+      request['generatedVoterToken'] = cookieToken;
     }
 
-    const { gameId, questionId } = request.body as {
-      gameId?: string;
-      questionId?: string;
-    };
+    const body = request.body ?? {};
+    const rawVotes = Array.isArray(body.votes) ? body.votes : [body];
 
-    if (!gameId || !questionId) {
-      // Body validation will catch this — guard just needs the ids present
+    const votes = rawVotes.filter(
+      (vote) => vote?.gameId && vote?.questionId,
+    ) as Array<{ gameId: string; questionId: string }>;
+
+    if (!votes.length) {
       return true;
     }
 
-    // Check for an existing vote with this cookie for the same question
-    const existing = await this.voterRepository.findOne({
-      where: {
-        game_id: gameId,
-        question_id: questionId,
-        cookie_token: cookieToken,
-      },
-    });
+    const seen = new Set<string>();
+    for (const vote of votes) {
+      const key = `${vote.gameId}:${vote.questionId}`;
+      if (seen.has(key)) {
+        throw new ForbiddenException(
+          'Duplicate question submissions are not allowed in the same vote batch',
+        );
+      }
+      seen.add(key);
 
-    if (existing) {
-      throw new ForbiddenException(
-        'You have already voted on this question',
-      );
+      const existing = await this.voterRepository.findOne({
+        where: {
+          game_id: vote.gameId,
+          question_id: vote.questionId,
+          cookie_token: cookieToken,
+        },
+      });
+
+      if (existing) {
+        throw new ForbiddenException('You have already voted on this question');
+      }
     }
 
     return true;

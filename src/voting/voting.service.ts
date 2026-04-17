@@ -17,7 +17,7 @@ import { EventsService } from '../events/events.service';
 import { GameEventType } from '../events/dto/game-event.dto';
 import { VotingState } from '../common/enums/game.enums';
 import { buildDeviceFingerprint } from '../common/guards/voter.guard';
-import { CastVoteDto } from './dto/cast-vote.dto';
+import { CastVoteDto, VoteSubmissionDto } from './dto/cast-vote.dto';
 
 @Injectable()
 export class VotingService {
@@ -40,21 +40,99 @@ export class VotingService {
   ) {}
 
   /**
-   * Generates and sets a voter_token cookie for a player joining a game.
-   * This token is the primary dedup key used by VoterGuard.
-   *
-   * If the player already has a valid voter_token cookie for this game we
-   *  reuse it — this handles page refreshes gracefully without creating
-   *  duplicate sessions.
-   *
-   * @returns The voter token UUID (already set as cookie by the controller)
+   * Returns all questions and their options for the voting/survey phase.
+   * Omits vote counts so voters cannot see live tally during voting.
+   * Only available while voting_state is OPEN.
+   */
+  async getQuestionsForVoting(gameCode: string): Promise<object> {
+    const game = await this.gameRepo.findOne({
+      where: { game_code: gameCode.toUpperCase() },
+      select: ['id', 'game_name', 'voting_state'],
+    });
+    if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
+
+    if (game.voting_state !== VotingState.OPEN) {
+      throw new BadRequestException(
+        'Voting is not currently open for this game',
+      );
+    }
+
+    const questions = await this.questionRepo.find({
+      where: { game_id: game.id },
+      relations: ['options'],
+      order: { created_at: 'ASC' },
+    });
+
+    return {
+      gameId: game.id,
+      gameName: game.game_name,
+      questions: questions.map((q) => ({
+        questionId: q.id,
+        question: q.question,
+        options: q.options.map((o) => ({
+          optionId: o.id,
+          text: o.option_text,
+        })),
+      })),
+    };
+  }
+
+  /**
+   * Generates or reuses a voter_token UUID cookie if present on the request.
    */
   getOrCreateVoterToken(req: Request): string {
     const existing: string | undefined = req.cookies?.voter_token as string;
-    if (existing && this.isValidUuid(existing)) {
+    if (
+      existing &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        existing,
+      )
+    ) {
       return existing;
     }
     return randomUUID();
+  }
+
+  /**
+   * Casts one or more votes in a single request.
+   * The vote endpoint remains throttled to 1 request / 10s per IP,
+   * so batching reduces client friction.
+   */
+  async castVotes(
+    gameCode: string,
+    dto: CastVoteDto,
+    cookieToken: string,
+    req: Request,
+  ): Promise<{ message: string }> {
+    const game = await this.gameRepo.findOne({
+      where: { game_code: gameCode.toUpperCase() },
+      select: ['id', 'game_code', 'voting_state'],
+    });
+    if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
+
+    if (game.voting_state !== VotingState.OPEN) {
+      throw new BadRequestException(
+        'Voting is not currently open for this game',
+      );
+    }
+
+    const questionIds = new Set<string>();
+    for (const vote of dto.votes) {
+      if (vote.gameId !== game.id) {
+        throw new BadRequestException(
+          'All votes in the batch must belong to the requested game',
+        );
+      }
+      if (questionIds.has(vote.questionId)) {
+        throw new BadRequestException(
+          'Duplicate question submissions are not allowed in the same batch',
+        );
+      }
+      questionIds.add(vote.questionId);
+      await this.castVote(vote, cookieToken, req, game);
+    }
+
+    return { message: 'Votes cast successfully' };
   }
 
   /**
@@ -71,17 +149,20 @@ export class VotingService {
    *   5. Emits a vote_update SSE so the admin survey stats update live.
    */
   async castVote(
-    dto: CastVoteDto,
+    dto: VoteSubmissionDto,
     cookieToken: string,
     req: Request,
+    game?: Game,
   ): Promise<{ message: string }> {
-    const game = await this.gameRepo.findOne({
-      where: { id: dto.gameId },
-      select: ['id', 'game_code', 'voting_state'],
-    });
-    if (!game) throw new NotFoundException('Game not found');
+    const resolvedGame =
+      game ??
+      (await this.gameRepo.findOne({
+        where: { id: dto.gameId },
+        select: ['id', 'game_code', 'voting_state'],
+      }));
+    if (!resolvedGame) throw new NotFoundException('Game not found');
 
-    if (game.voting_state !== VotingState.OPEN) {
+    if (resolvedGame.voting_state !== VotingState.OPEN) {
       throw new BadRequestException(
         'Voting is not currently open for this game',
       );
@@ -146,7 +227,7 @@ export class VotingService {
     const totalVotes = allOptions.reduce((sum, o) => sum + o.votes, 0);
 
     // Broadcast vote total update to admin survey view (and any connected clients)
-    this.eventsService.emit(game.game_code, GameEventType.VOTE_UPDATE, {
+    this.eventsService.emit(resolvedGame.game_code, GameEventType.VOTE_UPDATE, {
       questionId: dto.questionId,
       totalVotes,
     });
@@ -157,7 +238,7 @@ export class VotingService {
 
   // ── Private Helpers ───────────────────────────────────────────────────────
 
-  /** Masks the last octet of an IPv4 address for GDPR compliance. */
+  /** Masks the last IPv4 octet for GDPR compliance before storing. */
   private maskIp(ip: string): string {
     const parts = ip.split('.');
     if (parts.length === 4) {
@@ -165,12 +246,5 @@ export class VotingService {
     }
     // IPv6 — return as-is (masking IPv6 is more complex; log for audit)
     return ip;
-  }
-
-  /** Validates that a string is a UUID v4 pattern. */
-  private isValidUuid(value: string): boolean {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      value,
-    );
   }
 }

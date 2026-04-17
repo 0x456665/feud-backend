@@ -199,5 +199,68 @@ describe('GameService', () => {
         expect.objectContaining({ teamATotal: 30, teamBTotal: 5 }),
       );
     });
+
+    it('throws when attempting to score a question more than once', async () => {
+      gameRepo.findOne.mockResolvedValue({
+        id: 'g1',
+        game_code: 'FEUD4X',
+        play_state: PlayState.IN_PROGRESS,
+        team_a_name: 'Smiths',
+        team_b_name: 'Johnsons',
+      });
+      const log = {
+        game_id: 'g1',
+        team_a_score: 10,
+        team_b_score: 5,
+        state_snapshot: {
+          lastScoringTeam: TeamSide.TEAM_A,
+          scoredQuestionId: 'q1',
+        },
+        current_question_id: 'q1',
+        options_revealed: [],
+        current_strikes: 0,
+      };
+      gameplayLogRepo.findOne.mockResolvedValue(log);
+
+      await expect(
+        service.addScore('FEUD4X', {
+          team: TeamSide.TEAM_B,
+          points: 10,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(gameplayLogRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows scoring a new question after the previous one was scored', async () => {
+      gameRepo.findOne.mockResolvedValue({
+        id: 'g1',
+        game_code: 'FEUD4X',
+        play_state: PlayState.IN_PROGRESS,
+        team_a_name: 'Smiths',
+        team_b_name: 'Johnsons',
+      });
+      const log = {
+        game_id: 'g1',
+        team_a_score: 10,
+        team_b_score: 5,
+        state_snapshot: {
+          lastScoringTeam: TeamSide.TEAM_A,
+          scoredQuestionId: 'q1',
+        },
+        current_question_id: 'q2',
+        options_revealed: [],
+        current_strikes: 0,
+      };
+      gameplayLogRepo.findOne.mockResolvedValue(log);
+      gameplayLogRepo.save.mockResolvedValue(log);
+
+      await service.addScore('FEUD4X', {
+        team: TeamSide.TEAM_B,
+        points: 15,
+      });
+
+      expect(log.team_b_score).toBe(20);
+      expect(log.state_snapshot.scoredQuestionId).toBe('q2');
+    });
   });
 });

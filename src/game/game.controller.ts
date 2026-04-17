@@ -10,7 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { GameService } from './game.service';
+import { GameService, BoardSnapshot } from './game.service';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CreateGameDto } from './dto/create-game.dto';
 import { UpdateVotingStateDto } from './dto/update-voting-state.dto';
@@ -166,7 +166,7 @@ export class GameController {
    */
   @Get('admin/games/:gameCode/log')
   @UseGuards(AdminGuard)
-  async getLog(@Param('gameCode') gameCode: string) {
+  async getLog(@Param('gameCode') gameCode: string): Promise<BoardSnapshot> {
     return this.gameService.getBoardSnapshot(gameCode);
   }
 
@@ -178,7 +178,7 @@ export class GameController {
    * without replaying the full SSE event history.
    */
   @Get('games/:gameCode/board')
-  async getBoardSnapshot(@Param('gameCode') gameCode: string) {
+  async getBoardSnapshot(@Param('gameCode') gameCode: string): Promise<BoardSnapshot> {
     return this.gameService.getBoardSnapshot(gameCode);
   }
 }

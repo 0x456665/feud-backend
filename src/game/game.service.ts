@@ -38,6 +38,46 @@ const BCRYPT_ROUNDS = 12;
 /** Maximum game_code generation retries before giving up. */
 const CODE_GEN_RETRIES = 5;
 
+export interface BoardSnapshot {
+  id: string;
+  game_id: string;
+  team_a_score: number;
+  team_b_score: number;
+  current_question_id?: string | null;
+  options_revealed: string[];
+  questions_completed: string[];
+  current_strikes: number;
+  state_snapshot?: Record<string, unknown> | null;
+  updated_at: Date;
+  game_code: string;
+  game_name: string;
+  team_a_name: string;
+  team_b_name: string;
+  play_state: PlayState;
+  voting_state: VotingState;
+  current_question: {
+    id: string;
+    question_text: string;
+    round_number: number;
+    total_options: number;
+  } | null;
+  revealed_options: Array<{
+    option_id: string;
+    option_text: string;
+    votes: number;
+    rank: number;
+    points: number;
+  }>;
+  winner: {
+    winning_team: TeamSide;
+    team_name: string;
+    team_a_total: number;
+    team_b_total: number;
+    team_a_name: string;
+    team_b_name: string;
+  } | null;
+}
+
 @Injectable()
 export class GameService {
   private readonly logger = new Logger(GameService.name);
@@ -373,6 +413,8 @@ export class GameService {
     log.state_snapshot = {
       ...(log.state_snapshot ?? {}),
       activeTeam: null,
+      lastScoringTeam: null,
+      scoredQuestionId: null,
     };
     await this.gameplayLogRepo.save(log);
 
@@ -465,6 +507,21 @@ export class GameService {
   async addScore(gameCode: string, dto: AddScoreDto): Promise<GameplayLog> {
     const { game, log } = await this.getActiveGame(gameCode);
 
+    if (!log.current_question_id) {
+      throw new BadRequestException(
+        'No active question to score — advance to the next question first',
+      );
+    }
+
+    if (
+      (log.state_snapshot?.scoredQuestionId as string | null) ===
+      log.current_question_id
+    ) {
+      throw new BadRequestException(
+        'This question has already been scored. Advance to the next question to continue.',
+      );
+    }
+
     if (dto.team === TeamSide.TEAM_A) {
       log.team_a_score += dto.points;
     } else {
@@ -474,6 +531,7 @@ export class GameService {
     log.state_snapshot = {
       ...(log.state_snapshot ?? {}),
       lastScoringTeam: dto.team,
+      scoredQuestionId: log.current_question_id,
     };
     await this.gameplayLogRepo.save(log);
 
@@ -547,21 +605,93 @@ export class GameService {
    * Returns the current gameplay log — used by clients to resync after
    * a disconnection without replaying the full event history.
    */
-  async getBoardSnapshot(gameCode: string): Promise<GameplayLog> {
+  async getBoardSnapshot(gameCode: string): Promise<BoardSnapshot> {
     const game = await this.gameRepo.findOne({
       where: { game_code: gameCode.toUpperCase() },
-      select: ['id'],
+      select: [
+        'id',
+        'game_code',
+        'game_name',
+        'team_a_name',
+        'team_b_name',
+        'play_state',
+        'voting_state',
+      ],
     });
     if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
 
     const log = await this.gameplayLogRepo.findOne({
       where: { game_id: game.id },
-      relations: ['current_question'],
+      relations: ['current_question', 'current_question.options'],
     });
     if (!log)
       throw new NotFoundException('Gameplay log not found for this game');
 
-    return log;
+    const currentQuestion = log.current_question;
+    const currentQuestionOptions = currentQuestion?.options ?? [];
+    const revealedOptions = currentQuestionOptions
+      .filter((option) => log.options_revealed.includes(option.id))
+      .sort((left, right) => (left.rank ?? 999) - (right.rank ?? 999))
+      .map((option) => ({
+        option_id: option.id,
+        option_text: option.option_text,
+        votes: option.votes,
+        rank: option.rank ?? 0,
+        points: option.points ?? 0,
+      }));
+
+    const rankedOptionCount = currentQuestionOptions.filter(
+      (option) => option.rank !== null,
+    ).length;
+
+    const gameWin = await this.gameWinRepo.findOne({
+      where: { game_id: game.id },
+      select: ['winning_team', 'team_a_total', 'team_b_total'],
+    });
+
+    return {
+      id: log.id,
+      game_id: log.game_id,
+      team_a_score: log.team_a_score,
+      team_b_score: log.team_b_score,
+      current_question_id: log.current_question_id ?? null,
+      options_revealed: log.options_revealed,
+      questions_completed: log.questions_completed,
+      current_strikes: log.current_strikes,
+      state_snapshot: log.state_snapshot ?? null,
+      updated_at: log.updated_at,
+      game_code: game.game_code,
+      game_name: game.game_name,
+      team_a_name: game.team_a_name,
+      team_b_name: game.team_b_name,
+      play_state: game.play_state,
+      voting_state: game.voting_state,
+      current_question: currentQuestion
+        ? {
+            id: currentQuestion.id,
+            question_text: currentQuestion.question,
+            round_number: currentQuestion.display_order ?? 0,
+            total_options:
+              rankedOptionCount > 0
+                ? rankedOptionCount
+                : currentQuestion.number_of_options,
+          }
+        : null,
+      revealed_options: revealedOptions,
+      winner: gameWin
+        ? {
+            winning_team: gameWin.winning_team,
+            team_name:
+              gameWin.winning_team === TeamSide.TEAM_A
+                ? game.team_a_name
+                : game.team_b_name,
+            team_a_total: gameWin.team_a_total,
+            team_b_total: gameWin.team_b_total,
+            team_a_name: game.team_a_name,
+            team_b_name: game.team_b_name,
+          }
+        : null,
+    };
   }
 
   // ── Private Helpers ───────────────────────────────────────────────────────

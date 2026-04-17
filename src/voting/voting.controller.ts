@@ -17,69 +17,59 @@ import { VotingService } from './voting.service';
 import { VoterGuard } from '../common/guards/voter.guard';
 import { CastVoteDto } from './dto/cast-vote.dto';
 
-/** How long the voter_token cookie lasts in seconds (24 hours). */
-const COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
+/** How long the voter_token cookie lasts in milliseconds (24 hours). */
+const COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
- * VotingController — handles player join and vote submission.
+ * VotingController — player voting endpoints.
  *
- * GET  /games/:gameCode         → Sets voter_token cookie, returns game info
- * POST /games/:gameCode/vote    → Casts a vote (deduplicated by VoterGuard)
+ * GET  /games/:gameCode/questions  → Lists questions and options available to vote on
+ * POST /games/:gameCode/vote       → Casts a vote; sets voter_token cookie if not present
  */
 @Controller('games')
 export class VotingController {
   constructor(private readonly votingService: VotingService) {}
 
   /**
-   * Player entry point: returns basic game info and sets the voter_token cookie.
-   *
-   * The cookie is:
-   *   - httpOnly: not accessible via JS (XSS protection)
-   *   - sameSite: 'lax' — allowed on same-origin navigations
-   *   - secure: true in production (HTTPS-only transport)
-   *
-   * This endpoint is intentionally lightweight — it does not expose
-   * any game secrets (admin code, answer rankings, etc.).
+   * Returns questions and their options available to vote on.
+   * Only succeeds while voting_state is OPEN.
+   * Response includes the gameId, questionId, and optionIds needed by POST /vote.
    */
-  @Get(':gameCode/join')
-  async joinGame(
-    @Param('gameCode') gameCode: string,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const token = this.votingService.getOrCreateVoterToken(req);
-
-    res.cookie('voter_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: COOKIE_MAX_AGE_SECONDS * 1000, // Express expects milliseconds
-    });
-
-    return {
-      message: 'Joined game',
-      game_code: gameCode.toUpperCase(),
-    };
+  @Get(':gameCode/questions')
+  async getQuestionsForVoting(@Param('gameCode') gameCode: string) {
+    return this.votingService.getQuestionsForVoting(gameCode);
   }
 
   /**
-   * Casts a vote for an option during the survey/voting phase.
+   * Casts one or more question votes during the survey/voting phase.
+   * Sets (or refreshes) the voter_token cookie so first-time voters
+   * do not need to call /join beforehand.
    *
    * Guards applied (in order):
-   *   1. VoterGuard   — verifies voter_token cookie is present and not already used
+   *   1. VoterGuard   — auto-generates voter_token if absent; blocks duplicates
    *   2. Throttle     — max 1 request per 10 seconds per IP (via ThrottlerGuard)
-   *
-   * The voter_token cookie deduplicates votes per (game, question) pair.
    */
   @Post(':gameCode/vote')
   @UseGuards(VoterGuard)
   @Throttle({ default: { limit: 1, ttl: 10000 } })
   @HttpCode(HttpStatus.OK)
   async castVote(
+    @Param('gameCode') gameCode: string,
     @Body() dto: CastVoteDto,
     @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    const cookieToken: string = req.cookies?.voter_token;
-    return this.votingService.castVote(dto, cookieToken, req);
+    const cookieToken: string =
+      (req.cookies?.voter_token as string | undefined) ??
+      (req['generatedVoterToken'] as string);
+
+    res.cookie('voter_token', cookieToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: COOKIE_MAX_AGE_MS,
+    });
+
+    return this.votingService.castVotes(gameCode, dto, cookieToken, req);
   }
 }

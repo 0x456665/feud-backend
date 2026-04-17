@@ -40,9 +40,9 @@ async function bootstrap(): Promise<void> {
 
   // ── CORS ──────────────────────────────────────────────────────────────────
   // ALLOWED_ORIGINS is a comma-separated list of allowed origins.
-  // Defaults to localhost:3001 for local frontend dev.
+  // Defaults to localhost:5173 for local frontend dev.
   const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS ?? 'http://localhost:3001'
+    process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173'
   )
     .split(',')
     .map((o) => o.trim());

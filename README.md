@@ -29,6 +29,7 @@ Feud is a real-time Family Feud–style quiz game backend built with NestJS, Typ
 15. [Board snapshot](#board-snapshot)
 16. [Client integration guide](#client-integration-guide)
 17. [Development commands](#development-commands)
+18. [Changelog](#changelog)
 
 ---
 
@@ -40,10 +41,10 @@ A single game session follows this sequence:
 ADMIN                                  PLAYERS
 
 POST /admin/games          ──────────► Players receive game_code
-                                       GET /games/:code/join   (sets cookie)
-                                       GET /events/:code       (SSE stream)
-PATCH voting → OPEN        ──────────► Players cast votes
-                                       POST /games/:code/vote
+                                       GET /games/:code/join         (sets cookie, logs session)
+                                       GET /events/:code             (SSE stream)
+PATCH voting → OPEN        ──────────► GET /games/:code/questions    (fetch questions + options)
+                                       POST /games/:code/vote        (cast votes; cookie auto-set if absent)
 
 PATCH voting → CLOSED      ◄── automatic: std_dev computed, options ranked
 
@@ -150,7 +151,7 @@ Players are identified by a `voter_token` cookie (UUID v4) set by `GET /games/:g
 
 ## Player identity and cookies
 
-When a player joins via `GET /games/:gameCode/join`, the server sets:
+When a player calls `GET /games/:gameCode/join`, the server sets:
 
 ``` text
 Set-Cookie: voter_token=<uuid>; HttpOnly; SameSite=Lax; Max-Age=86400
@@ -168,7 +169,11 @@ The `voter_token` is the canonical identity for:
 
 The server also stores a device fingerprint (`SHA-256` of `IP:User-Agent`) alongside the cookie for analytics, but the **cookie is the authoritative dedup key** — fingerprints alone are not used to block votes.
 
-**Your client must send `credentials: 'include'`** on all requests that require the cookie (voting, board).
+**Calling `/join` is recommended but not strictly required before voting.** If a player hits `POST /games/:gameCode/vote` without a `voter_token` cookie, the server auto-generates one and returns it in the `Set-Cookie` header of the vote response. Subsequent votes will carry that cookie automatically (browser) or must echo it back (non-browser clients).
+
+If the player reloads the page, the browser will preserve the `voter_token` cookie and the client can safely re-fetch the current voting questions. If the cookie is lost (private mode, cleared storage, etc.), the server can still create a new `voter_token` on the next vote, but previously cast votes under the lost cookie cannot be recovered.
+
+**Your client must send `credentials: 'include'`** (fetch) or `withCredentials: true` (axios) on all requests so cookies are sent and received correctly.
 
 ---
 
@@ -177,7 +182,7 @@ The server also stores a device fingerprint (`SHA-256` of `IP:User-Agent`) along
 | Scope | Limit |
 |---|---|
 | All endpoints (global) | 300 requests / 60 seconds per IP |
-| `POST /games/:gameCode/vote` | 1 request / 10 seconds per IP |
+| `POST /games/:gameCode/vote` | 1 request / 10 seconds per IP (batch submissions are allowed)
 
 Exceeding the rate limit returns `429 Too Many Requests`.
 
@@ -246,7 +251,7 @@ Controls the live game board phase.
 
 ### Join game
 
-Sets the `voter_token` cookie and logs the player session.
+Sets the `voter_token` cookie and logs the player session. Recommended as the first step before fetching questions or voting, but not strictly required — the vote endpoint will auto-set the cookie on first use.
 
 ```
 GET /api/v1/games/:gameCode/join
@@ -265,9 +270,57 @@ The game code is always returned uppercased regardless of how it was passed in.
 
 ---
 
+### Get questions for voting
+
+Returns all questions and their options for a game. Use this to populate the voting form. **Only available while `voting_state` is `OPEN`.**
+
+Vote counts are intentionally omitted from this response so players cannot see the running tally while voting is in progress.
+
+```
+GET /api/v1/games/:gameCode/questions
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "gameId": "a1b2c3d4-e5f6-7890-abcd-1234567890ef",
+  "gameName": "Family Night 2026",
+  "questions": [
+    {
+      "questionId": "11112222-3333-4444-5555-666677778888",
+      "question": "Name a fruit you eat with breakfast",
+      "options": [
+        { "optionId": "aaaa1111-2222-3333-4444-555566667777", "text": "Banana" },
+        { "optionId": "bbbb1111-2222-3333-4444-555566667777", "text": "Apple" },
+        { "optionId": "cccc1111-2222-3333-4444-555566667777", "text": "Orange" },
+        { "optionId": "dddd1111-2222-3333-4444-555566667777", "text": "Grapes" },
+        { "optionId": "eeee1111-2222-3333-4444-555566667777", "text": "Strawberry" },
+        { "optionId": "ffff1111-2222-3333-4444-555566667777", "text": "Peach" }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `gameId` | The UUID to pass as `gameId` in the vote request body |
+| `questions[].questionId` | The UUID to pass as `questionId` in the vote request body |
+| `questions[].options[].optionId` | The UUID to include in `optionIds` in the vote request body |
+
+**Failure cases**
+
+| Condition | Status |
+|---|---|
+| Game not found | `404 Not Found` |
+| `voting_state` is not `OPEN` | `400 Bad Request` |
+
+---
+
 ### Cast vote
 
-Submit the player's answer selections for the current question. Requires the `voter_token` cookie.
+Submit one or more question selections in a single request. Requires the `voter_token` cookie (auto-set on first vote if not already present — see [Player identity and cookies](#player-identity-and-cookies)).
 
 ```
 POST /api/v1/games/:gameCode/vote
@@ -278,16 +331,32 @@ Content-Type: application/json
 
 ```json
 {
-  "gameId": "a1b2c3d4-e5f6-7890-abcd-1234567890ef",
-  "questionId": "11112222-3333-4444-5555-666677778888",
-  "optionIds": [
-    "aaaa1111-2222-3333-4444-555566667777",
-    "bbbb1111-2222-3333-4444-555566667777",
-    "cccc1111-2222-3333-4444-555566667777",
-    "dddd1111-2222-3333-4444-555566667777"
+  "votes": [
+    {
+      "gameId": "a1b2c3d4-e5f6-7890-abcd-1234567890ef",
+      "questionId": "11112222-3333-4444-5555-666677778888",
+      "optionIds": [
+        "aaaa1111-2222-3333-4444-555566667777",
+        "bbbb1111-2222-3333-4444-555566667777",
+        "cccc1111-2222-3333-4444-555566667777",
+        "dddd1111-2222-3333-4444-555566667777"
+      ]
+    },
+    {
+      "gameId": "a1b2c3d4-e5f6-7890-abcd-1234567890ef",
+      "questionId": "99991111-2222-3333-4444-555566667777",
+      "optionIds": [
+        "eeee1111-2222-3333-4444-555566667777",
+        "ffff1111-2222-3333-4444-555566667777",
+        "00001111-2222-3333-4444-555566667777",
+        "11112222-3333-4444-5555-666677778888"
+      ]
+    }
   ]
 }
 ```
+
+This endpoint is now designed to accept multiple question submissions in one request, which helps avoid the 10-second vote throttle for back-to-back questions.
 
 | Field | Type | Constraints |
 |---|---|---|
@@ -299,7 +368,7 @@ Content-Type: application/json
 
 ```json
 {
-  "message": "Vote cast successfully"
+  "message": "Votes cast successfully"
 }
 ```
 
@@ -307,7 +376,6 @@ Content-Type: application/json
 
 | Condition | Status |
 |---|---|
-| Missing `voter_token` cookie | `403 Forbidden` |
 | Already voted on this question | `403 Forbidden` |
 | `voting_state` is not `OPEN` | `400 Bad Request` |
 | Game, question, or any option not found | `404 Not Found` |
@@ -1089,12 +1157,17 @@ Combine this with `GET /api/v1/admin/games/:gameCode` (or a cached question list
 ### Recommended player client flow
 
 ```
-1.  GET /games/:gameCode/join          → sets voter_token cookie, returns game_code
-2.  GET /events/:gameCode              → open SSE stream (EventSource)
+1.  GET /games/:gameCode/join          → sets voter_token cookie, logs session (recommended first step)
+2.  GET /events/:gameCode              → open SSE stream (EventSource); listen for game_state events
 3.  GET /games/:gameCode/board         → load initial board state (for reconnects)
-4.  Handle SSE events to update UI
-5.  POST /games/:gameCode/vote         → when player submits answers
-6.  On SSE error → reconnect + GET /board to resync
+4.  On SSE game_state { votingState: "OPEN" }:
+       GET /games/:gameCode/questions  → fetch questions + options to render the vote form
+5.  POST /games/:gameCode/vote         → submit one or more question vote selections in a single batch
+       (voter_token cookie is auto-set here if /join was skipped)
+6.  On SSE game_state { votingState: "CLOSED" }:
+       hide vote form; show "voting closed" message
+7.  On SSE next_question / reveal_option / etc. → update game board UI
+8.  On SSE error → reconnect + GET /board to resync
 ```
 
 ### Recommended admin client flow
@@ -1129,6 +1202,19 @@ async function joinGame(gameCode) {
   // → { message, game_code }
 }
 
+/**
+ * Fetches questions and their options for the voting form.
+ * Only succeeds while voting_state is OPEN.
+ * Returns: { gameId, gameName, questions: [{ questionId, question, options: [{ optionId, text }] }] }
+ */
+async function getQuestionsForVoting(gameCode) {
+  const res = await fetch(`${BASE}/games/${gameCode}/questions`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw await res.json();
+  return res.json();
+}
+
 function openEventStream(gameCode, onEvent, onReconnect) {
   let source = new EventSource(`${BASE}/events/${gameCode}`, {
     withCredentials: true,
@@ -1156,15 +1242,19 @@ async function getBoardSnapshot(gameCode) {
   return res.json();
 }
 
-async function castVote(gameCode, { gameId, questionId, optionIds }) {
+/**
+ * Casts a vote. voter_token cookie will be auto-set in the response
+ * if the player has not yet called joinGame().
+ */
+async function castVote(gameCode, { votes }) {
   const res = await fetch(`${BASE}/games/${gameCode}/vote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ gameId, questionId, optionIds }),
+    body: JSON.stringify({ votes }),
   });
   return res.json();
-  // → { message: "Vote cast successfully" }
+  // → { message: "Votes cast successfully" }
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────
@@ -1213,7 +1303,9 @@ function handleGameEvent(type, payload) {
   switch (type) {
     case 'game_state':
       // payload: { playState, votingState }
-      // Toggle vote form visibility, show/hide game board
+      // - votingState === "OPEN"   → show vote form; call getQuestionsForVoting() to populate it
+      // - votingState === "CLOSED" → hide vote form; show "voting closed" message
+      // - playState   === "IN_PROGRESS" → hide survey UI; show game board
       break;
 
     case 'next_question':
@@ -1267,3 +1359,84 @@ pnpm run test         # Run unit tests
 pnpm run test:e2e     # Run end-to-end tests
 pnpm run test:cov     # Run tests with coverage report
 ```
+
+---
+
+## Changelog
+
+### April 2026 — Voting flow redesign
+
+This section documents all breaking and additive changes made to the voting flow. Client applications must be updated to match.
+
+---
+
+#### New endpoint: `GET /games/:gameCode/questions`
+
+A new **public** (no auth required) endpoint has been added to return questions and options for voting.
+
+```
+GET /api/v1/games/:gameCode/questions
+```
+
+- Returns all questions belonging to the game and all options for each question.
+- **Only succeeds while `voting_state` is `OPEN`**; returns `400 Bad Request` otherwise.
+- Vote counts (`votes`) are **not** included in the response — players cannot see the running tally while voting is live.
+- The response includes `gameId`, `questionId`, and `optionId` values that must be forwarded verbatim in the vote request body.
+
+**Response shape:**
+
+```json
+{
+  "gameId": "<uuid>",
+  "gameName": "Family Night 2026",
+  "questions": [
+    {
+      "questionId": "<uuid>",
+      "question": "Name a fruit you eat with breakfast",
+      "options": [
+        { "optionId": "<uuid>", "text": "Banana" },
+        { "optionId": "<uuid>", "text": "Apple" }
+      ]
+    }
+  ]
+}
+```
+
+**Client action required:** Fetch this endpoint when the `game_state` SSE event arrives with `votingState: "OPEN"` (or on initial page load if voting is already open). Use the returned IDs to populate the vote form.
+
+---
+
+#### Changed: `POST /games/:gameCode/vote` now accepts batch submissions and sets the `voter_token` cookie
+
+Previously, a player was required to call `GET /games/:gameCode/join` first to obtain the `voter_token` cookie before submitting a vote — a missing cookie caused a `403 Forbidden` error.
+
+**The vote endpoint now accepts a batch of question submissions in one request and auto-generates the cookie if none is present.** The `Set-Cookie` header is included in the vote response exactly as if the player had called `/join` first.
+
+- Calling `/join` beforehand is still **recommended** for session tracking and audience count accuracy, but it is no longer a hard prerequisite.
+- If a client skips `/join` and goes straight to voting, the `voter_token` cookie will be set in the vote response and must be included in subsequent vote requests (browsers handle this automatically; non-browser clients must read and re-send the cookie).
+- The `403 Forbidden — missing voter_token` error is **removed**. A `403` from the vote endpoint now means exclusively: "you have already voted on this question."
+
+**Client action required (if applicable):** Remove any hard-coded requirement to call `/join` before rendering the vote form. The guard no longer blocks votes for players who land directly on the voting page.
+
+The vote endpoint now accepts a batch of question submissions in one request. This lets the client submit multiple answers without waiting 10 seconds between separate POST requests.
+
+When the page reloads, re-fetch `/games/:gameCode/questions` and preserve the browser's `voter_token` cookie. If the cookie is still present, the user will keep their vote identity and duplicate submissions are prevented. If the cookie is lost, a new voter identity will be created and previous votes under the lost cookie cannot be recovered.
+
+---
+
+#### Changed: `GET /games/:gameCode/join` — no longer in VotingController
+
+The duplicate `GET /games/:gameCode/join` handler that previously existed in `VotingController` has been removed. The endpoint still exists and is unchanged — it is now served exclusively by `PlayersController`. No URL change; no response shape change.
+
+---
+
+#### Summary of client changes needed
+
+| Area | Change required |
+|---|---|
+| Vote form data source | **New:** call `GET /games/:gameCode/questions` to get `gameId`, `questionId`, `optionId` values for the form instead of using cached admin data |
+| `/join` gate | **Remove** any logic that blocks the vote UI until `/join` has been called; it is now optional |
+| Vote submission format | Use the new batch request shape: `votes: [{ gameId, questionId, optionIds }]` |
+| `403` handling on `/vote` | Update copy/logic: a `403` now means "already voted", never "not joined" |
+| `game_state` SSE handler | When `votingState` transitions to `"OPEN"`, call `getQuestionsForVoting()` and populate the form |
+| `game_state` SSE handler | When `votingState` transitions to `"CLOSED"` or `"PAUSED"`, hide/disable the vote form |
