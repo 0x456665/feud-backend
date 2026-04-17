@@ -146,6 +146,29 @@ describe('VotingService', () => {
       expect(result.message).toBe('Vote cast successfully');
     });
 
+    it('allows submitting a question with no selected options', async () => {
+      const emptyDto = {
+        gameId: 'g-uuid',
+        questionId: 'q-uuid',
+        optionIds: [],
+      };
+      gameRepo.findOne.mockResolvedValue({
+        id: 'g-uuid',
+        game_code: 'FEUD4X',
+        voting_state: VotingState.OPEN,
+      });
+      questionRepo.findOne.mockResolvedValue({ id: 'q-uuid' });
+      optionRepo.find.mockResolvedValueOnce([{ votes: 3 }, { votes: 2 }, { votes: 1 }]);
+      voterRepo.create.mockReturnValue({ id: 'v-uuid' });
+      voterRepo.save.mockResolvedValue({ id: 'v-uuid' });
+
+      const result = await service.castVote(emptyDto, '550e8400-e29b-41d4-a716-446655440000', mockReq);
+
+      expect(optionRepo.increment).not.toHaveBeenCalled();
+      expect(voterRepo.save).toHaveBeenCalled();
+      expect(result.message).toBe('Vote cast successfully');
+    });
+
     it('throws NotFoundException when one of the option IDs is invalid', async () => {
       gameRepo.findOne.mockResolvedValue({
         id: 'g-uuid',

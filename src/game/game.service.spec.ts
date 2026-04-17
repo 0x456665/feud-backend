@@ -10,6 +10,7 @@ import { Gameplay } from './entities/gameplay.entity';
 import { GameplayLog } from './entities/gameplay-log.entity';
 import { Question } from '../question/entities/question.entity';
 import { Option } from '../question/entities/option.entity';
+import { Voter } from '../voting/entities/voter.entity';
 import { EventsService } from '../events/events.service';
 import { VotingState, PlayState, TeamSide } from '../common/enums/game.enums';
 import { GameEventType } from '../events/dto/game-event.dto';
@@ -38,6 +39,7 @@ describe('GameService', () => {
   let gameRepo: ReturnType<typeof mockRepo>;
   let questionRepo: ReturnType<typeof mockRepo>;
   let optionRepo: ReturnType<typeof mockRepo>;
+  let voterRepo: ReturnType<typeof mockRepo>;
   let gameplayLogRepo: ReturnType<typeof mockRepo>;
   let gameWinRepo: ReturnType<typeof mockRepo>;
   let gameplayRepo: ReturnType<typeof mockRepo>;
@@ -66,6 +68,7 @@ describe('GameService', () => {
     gameRepo = module.get(getRepositoryToken(Game));
     questionRepo = module.get(getRepositoryToken(Question));
     optionRepo = module.get(getRepositoryToken(Option));
+    voterRepo = module.get(getRepositoryToken(Voter));
     gameplayLogRepo = module.get(getRepositoryToken(GameplayLog));
     gameWinRepo = module.get(getRepositoryToken(GameWin));
     gameplayRepo = module.get(getRepositoryToken(Gameplay));
@@ -134,6 +137,25 @@ describe('GameService', () => {
   });
 
   // ── startGame ─────────────────────────────────────────────────────────────
+
+  describe('getSurveyVoterCount()', () => {
+    it('returns zero when no voters exist yet', async () => {
+      gameRepo.findOne.mockResolvedValue({ id: 'g1' });
+      const queryBuilder = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ count: '0' }),
+      };
+      voterRepo.createQueryBuilder.mockReturnValue(queryBuilder);
+
+      const result = await service.getSurveyVoterCount('FEUD4X');
+
+      expect(queryBuilder.where).toHaveBeenCalledWith('voter.game_id = :gameId', {
+        gameId: 'g1',
+      });
+      expect(result).toEqual({ totalVoters: 0 });
+    });
+  });
 
   describe('startGame()', () => {
     it('throws if voting is not CLOSED', async () => {

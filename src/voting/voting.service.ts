@@ -179,28 +179,30 @@ export class VotingService {
     // Deduplicate submitted option IDs in case the caller sends the same id twice
     const uniqueOptionIds = [...new Set(dto.optionIds)];
 
-    // Validate all submitted options exist and belong to this question.
-    // TypeORM treats an array of `where` objects as OR conditions.
-    const matchedOptions = await this.optionRepo.find({
-      where: uniqueOptionIds.map((id) => ({ id, question_id: dto.questionId })),
-      select: ['id'],
-    });
-    if (matchedOptions.length !== uniqueOptionIds.length) {
-      throw new NotFoundException(
-        'One or more options not found for this question',
+    if (uniqueOptionIds.length > 0) {
+      // Validate all submitted options exist and belong to this question.
+      // TypeORM treats an array of `where` objects as OR conditions.
+      const matchedOptions = await this.optionRepo.find({
+        where: uniqueOptionIds.map((id) => ({ id, question_id: dto.questionId })),
+        select: ['id'],
+      });
+      if (matchedOptions.length !== uniqueOptionIds.length) {
+        throw new NotFoundException(
+          'One or more options not found for this question',
+        );
+      }
+
+      // Atomically increment vote count for each selected option
+      await Promise.all(
+        uniqueOptionIds.map((id) =>
+          this.optionRepo.increment(
+            { id, question_id: dto.questionId },
+            'votes',
+            1,
+          ),
+        ),
       );
     }
-
-    // Atomically increment vote count for each selected option
-    await Promise.all(
-      uniqueOptionIds.map((id) =>
-        this.optionRepo.increment(
-          { id, question_id: dto.questionId },
-          'votes',
-          1,
-        ),
-      ),
-    );
 
     // Record the voter for dedup tracking
     const fingerprint = buildDeviceFingerprint(

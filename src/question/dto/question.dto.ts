@@ -34,7 +34,7 @@ export class CreateQuestionDto {
   @IsOptional()
   @IsInt()
   @Min(2)
-  @Max(10)
+  @Max(15)
   number_of_options?: number;
 }
 
@@ -62,7 +62,7 @@ export class ImportQuestionDto {
   @IsOptional()
   @IsInt()
   @Min(2)
-  @Max(10)
+  @Max(15)
   number_of_options?: number;
 }
 

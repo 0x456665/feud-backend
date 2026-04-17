@@ -9,6 +9,7 @@ import { Gameplay } from './entities/gameplay.entity';
 import { GameplayLog } from './entities/gameplay-log.entity';
 import { Question } from '../question/entities/question.entity';
 import { Option } from '../question/entities/option.entity';
+import { Voter } from '../voting/entities/voter.entity';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { EventsModule } from '../events/events.module';
 
@@ -28,6 +29,7 @@ import { EventsModule } from '../events/events.module';
       GameplayLog,
       Question,
       Option,
+      Voter,
     ]),
     EventsModule,
   ],

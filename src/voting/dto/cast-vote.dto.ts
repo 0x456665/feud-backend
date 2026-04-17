@@ -2,9 +2,9 @@ import { Type } from 'class-transformer';
 import {
   IsUUID,
   IsArray,
-  ArrayMinSize,
   ArrayMaxSize,
   ValidateNested,
+  ArrayMinSize,
 } from 'class-validator';
 
 /**
@@ -17,10 +17,9 @@ export class VoteSubmissionDto {
   @IsUUID()
   questionId!: string;
 
-  /** Four to six option IDs the voter has chosen for this question. */
+  /** Up to three option IDs the voter has chosen for this question. */
   @IsArray()
-  @ArrayMinSize(4)
-  @ArrayMaxSize(6)
+  @ArrayMaxSize(3)
   @IsUUID('4', { each: true })
   optionIds!: string[];
 }

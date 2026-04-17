@@ -15,6 +15,7 @@ import { Gameplay } from './entities/gameplay.entity';
 import { GameplayLog } from './entities/gameplay-log.entity';
 import { Question } from '../question/entities/question.entity';
 import { Option } from '../question/entities/option.entity';
+import { Voter } from '../voting/entities/voter.entity';
 import { EventsService } from '../events/events.service';
 
 import { VotingState, PlayState, TeamSide } from '../common/enums/game.enums';
@@ -100,6 +101,9 @@ export class GameService {
 
     @InjectRepository(Option)
     private readonly optionRepo: Repository<Option>,
+
+    @InjectRepository(Voter)
+    private readonly voterRepo: Repository<Voter>,
 
     private readonly dataSource: DataSource,
     private readonly eventsService: EventsService,
@@ -238,6 +242,18 @@ export class GameService {
         })),
       };
     });
+  }
+
+  async getSurveyVoterCount(gameCode: string): Promise<{ totalVoters: number }> {
+    const game = await this.getGame(gameCode);
+
+    const result = await this.voterRepo
+      .createQueryBuilder('voter')
+      .select('COUNT(DISTINCT voter.cookie_token)', 'count')
+      .where('voter.game_id = :gameId', { gameId: game.id })
+      .getRawOne<{ count: string }>();
+
+    return { totalVoters: Number(result?.count ?? '0') };
   }
 
   // ── Admin: Voting State ───────────────────────────────────────────────────

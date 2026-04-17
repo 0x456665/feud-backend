@@ -76,6 +76,15 @@ export class GameController {
   }
 
   /**
+   * Returns the number of unique voters that submitted at least one answer.
+   */
+  @Get('admin/games/:gameCode/survey-voters')
+  @UseGuards(AdminGuard)
+  async getSurveyVoterCount(@Param('gameCode') gameCode: string) {
+    return this.gameService.getSurveyVoterCount(gameCode);
+  }
+
+  /**
    * Opens, pauses, or closes the voting/survey phase.
    * Closing automatically computes std_dev and option points.
    */
