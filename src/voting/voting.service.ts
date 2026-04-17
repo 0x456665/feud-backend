@@ -183,7 +183,10 @@ export class VotingService {
       // Validate all submitted options exist and belong to this question.
       // TypeORM treats an array of `where` objects as OR conditions.
       const matchedOptions = await this.optionRepo.find({
-        where: uniqueOptionIds.map((id) => ({ id, question_id: dto.questionId })),
+        where: uniqueOptionIds.map((id) => ({
+          id,
+          question_id: dto.questionId,
+        })),
         select: ['id'],
       });
       if (matchedOptions.length !== uniqueOptionIds.length) {

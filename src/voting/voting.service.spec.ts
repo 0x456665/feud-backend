@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type { Request } from 'express';
 
 import { VotingService } from './voting.service';
 import { Voter } from './entities/voter.entity';
@@ -11,10 +12,10 @@ import { EventsService } from '../events/events.service';
 import { VotingState } from '../common/enums/game.enums';
 
 const mockRepo = () => ({
-  findOne: jest.fn(),
-  find: jest.fn(),
-  save: jest.fn(),
-  create: jest.fn((data) => data),
+  findOne: jest.fn<Promise<unknown | null>, [unknown]>(),
+  find: jest.fn<Promise<unknown[]>, [unknown]>(),
+  save: jest.fn<Promise<unknown>, [unknown]>(),
+  create: jest.fn<unknown, [unknown]>().mockImplementation((data: unknown) => data),
   increment: jest.fn(),
 });
 
@@ -30,7 +31,7 @@ describe('VotingService', () => {
     ip: '192.168.1.100',
     headers: { 'user-agent': 'TestBrowser/1.0' },
     cookies: { voter_token: '550e8400-e29b-41d4-a716-446655440000' },
-  } as any;
+  } as unknown as Request;
 
   beforeEach(async () => {
     eventsService = { emit: jest.fn() };
@@ -97,7 +98,11 @@ describe('VotingService', () => {
       voterRepo.create.mockReturnValue({ id: 'v-uuid' });
       voterRepo.save.mockResolvedValue({ id: 'v-uuid' });
 
-      const result = await service.castVote(dto, '550e8400-e29b-41d4-a716-446655440000', mockReq);
+      const result = await service.castVote(
+        dto,
+        '550e8400-e29b-41d4-a716-446655440000',
+        mockReq,
+      );
 
       expect(optionRepo.increment).toHaveBeenCalledWith(
         { id: 'o-uuid', question_id: 'q-uuid' },
@@ -131,17 +136,27 @@ describe('VotingService', () => {
       voterRepo.create.mockReturnValue({ id: 'v-uuid' });
       voterRepo.save.mockResolvedValue({ id: 'v-uuid' });
 
-      const result = await service.castVote(multiDto, '550e8400-e29b-41d4-a716-446655440000', mockReq);
+      const result = await service.castVote(
+        multiDto,
+        '550e8400-e29b-41d4-a716-446655440000',
+        mockReq,
+      );
 
       expect(optionRepo.increment).toHaveBeenCalledTimes(3);
       expect(optionRepo.increment).toHaveBeenCalledWith(
-        { id: 'o-uuid-1', question_id: 'q-uuid' }, 'votes', 1,
+        { id: 'o-uuid-1', question_id: 'q-uuid' },
+        'votes',
+        1,
       );
       expect(optionRepo.increment).toHaveBeenCalledWith(
-        { id: 'o-uuid-2', question_id: 'q-uuid' }, 'votes', 1,
+        { id: 'o-uuid-2', question_id: 'q-uuid' },
+        'votes',
+        1,
       );
       expect(optionRepo.increment).toHaveBeenCalledWith(
-        { id: 'o-uuid-3', question_id: 'q-uuid' }, 'votes', 1,
+        { id: 'o-uuid-3', question_id: 'q-uuid' },
+        'votes',
+        1,
       );
       expect(result.message).toBe('Vote cast successfully');
     });
@@ -158,11 +173,19 @@ describe('VotingService', () => {
         voting_state: VotingState.OPEN,
       });
       questionRepo.findOne.mockResolvedValue({ id: 'q-uuid' });
-      optionRepo.find.mockResolvedValueOnce([{ votes: 3 }, { votes: 2 }, { votes: 1 }]);
+      optionRepo.find.mockResolvedValueOnce([
+        { votes: 3 },
+        { votes: 2 },
+        { votes: 1 },
+      ]);
       voterRepo.create.mockReturnValue({ id: 'v-uuid' });
       voterRepo.save.mockResolvedValue({ id: 'v-uuid' });
 
-      const result = await service.castVote(emptyDto, '550e8400-e29b-41d4-a716-446655440000', mockReq);
+      const result = await service.castVote(
+        emptyDto,
+        '550e8400-e29b-41d4-a716-446655440000',
+        mockReq,
+      );
 
       expect(optionRepo.increment).not.toHaveBeenCalled();
       expect(voterRepo.save).toHaveBeenCalled();
@@ -181,7 +204,11 @@ describe('VotingService', () => {
 
       await expect(
         service.castVote(
-          { gameId: 'g-uuid', questionId: 'q-uuid', optionIds: ['o-uuid', 'bad-uuid'] },
+          {
+            gameId: 'g-uuid',
+            questionId: 'q-uuid',
+            optionIds: ['o-uuid', 'bad-uuid'],
+          },
           'token-uuid',
           mockReq,
         ),
@@ -190,7 +217,9 @@ describe('VotingService', () => {
 
     it('masks the last IPv4 octet before storing', () => {
       // Access the private method via casting for test purposes
-      const masked = (service as any).maskIp('192.168.1.123');
+      const masked = (service as { maskIp: (ip: string) => string }).maskIp(
+        '192.168.1.123',
+      );
       expect(masked).toBe('192.168.1.0');
     });
   });
@@ -199,14 +228,14 @@ describe('VotingService', () => {
     it('returns existing valid UUID cookie', () => {
       const req = {
         cookies: { voter_token: '550e8400-e29b-41d4-a716-446655440000' },
-      } as any;
+      } as unknown as Request;
       expect(service.getOrCreateVoterToken(req)).toBe(
         '550e8400-e29b-41d4-a716-446655440000',
       );
     });
 
     it('generates a new UUID when no cookie present', () => {
-      const req = { cookies: {} } as any;
+      const req = { cookies: {} } as unknown as Request;
       const token = service.getOrCreateVoterToken(req);
       expect(token).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,

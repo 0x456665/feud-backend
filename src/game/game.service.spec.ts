@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import { GameService } from './game.service';
 import { Game } from './entities/game.entity';
@@ -22,15 +22,35 @@ const mockRepo = () => ({
   save: jest.fn(),
   create: jest.fn(),
   update: jest.fn(),
+  createQueryBuilder: jest.fn(),
 });
 
 /** Minimal mock DataSource that provides a transactional manager. */
 const mockDataSource = () => ({
-  transaction: jest.fn((cb: (manager: any) => Promise<any>) =>
-    cb({
-      create: (_entity: any, data: any) => ({ ...data }),
-      save: jest.fn((_, data) => Promise.resolve({ id: 'saved-id', ...data })),
-    }),
+  transaction: jest.fn(
+    (
+      cb: (manager: {
+        create: (
+          entity: unknown,
+          data: Record<string, unknown>,
+        ) => Record<string, unknown>;
+        save: jest.Mock<
+          Promise<Record<string, unknown>>,
+          [unknown, Record<string, unknown>]
+        >;
+      }) => Promise<unknown>,
+    ) =>
+      cb({
+        create: (_entity: unknown, data: Record<string, unknown>) => ({
+          ...data,
+        }),
+        save: jest.fn((_: unknown, data: Record<string, unknown>) =>
+          Promise.resolve({
+            id: 'saved-id',
+            ...data,
+          }),
+        ),
+      }),
   ),
 });
 
@@ -38,11 +58,8 @@ describe('GameService', () => {
   let service: GameService;
   let gameRepo: ReturnType<typeof mockRepo>;
   let questionRepo: ReturnType<typeof mockRepo>;
-  let optionRepo: ReturnType<typeof mockRepo>;
   let voterRepo: ReturnType<typeof mockRepo>;
   let gameplayLogRepo: ReturnType<typeof mockRepo>;
-  let gameWinRepo: ReturnType<typeof mockRepo>;
-  let gameplayRepo: ReturnType<typeof mockRepo>;
   let eventsService: { emit: jest.Mock };
   let dataSource: ReturnType<typeof mockDataSource>;
 
@@ -59,6 +76,7 @@ describe('GameService', () => {
         { provide: getRepositoryToken(GameplayLog), useFactory: mockRepo },
         { provide: getRepositoryToken(Question), useFactory: mockRepo },
         { provide: getRepositoryToken(Option), useFactory: mockRepo },
+        { provide: getRepositoryToken(Voter), useFactory: mockRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: EventsService, useValue: eventsService },
       ],
@@ -67,11 +85,8 @@ describe('GameService', () => {
     service = module.get<GameService>(GameService);
     gameRepo = module.get(getRepositoryToken(Game));
     questionRepo = module.get(getRepositoryToken(Question));
-    optionRepo = module.get(getRepositoryToken(Option));
     voterRepo = module.get(getRepositoryToken(Voter));
     gameplayLogRepo = module.get(getRepositoryToken(GameplayLog));
-    gameWinRepo = module.get(getRepositoryToken(GameWin));
-    gameplayRepo = module.get(getRepositoryToken(Gameplay));
   });
 
   it('should be defined', () => {
@@ -109,7 +124,9 @@ describe('GameService', () => {
     it('throws NotFoundException when game does not exist', async () => {
       gameRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.updateVotingState('NOCODE', { voting_state: VotingState.CLOSED }),
+        service.updateVotingState('NOCODE', {
+          voting_state: VotingState.CLOSED,
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -150,9 +167,12 @@ describe('GameService', () => {
 
       const result = await service.getSurveyVoterCount('FEUD4X');
 
-      expect(queryBuilder.where).toHaveBeenCalledWith('voter.game_id = :gameId', {
-        gameId: 'g1',
-      });
+      expect(queryBuilder.where).toHaveBeenCalledWith(
+        'voter.game_id = :gameId',
+        {
+          gameId: 'g1',
+        },
+      );
       expect(result).toEqual({ totalVoters: 0 });
     });
   });

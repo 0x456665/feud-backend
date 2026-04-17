@@ -34,19 +34,30 @@ export class VoterGuard implements CanActivate {
 
     // Use an existing voter_token cookie, or generate a fresh one that the
     // castVote handler will persist in the response cookie (first-time voters).
-    let cookieToken: string | undefined = request.cookies?.voter_token as string | undefined;
+    let cookieToken: string | undefined = request.cookies?.voter_token as
+      | string
+      | undefined;
     if (!cookieToken) {
       const { randomUUID } = await import('crypto');
       cookieToken = randomUUID();
       request['generatedVoterToken'] = cookieToken;
     }
 
-    const body = request.body ?? {};
-    const rawVotes = Array.isArray(body.votes) ? body.votes : [body];
+    type VoteRef = { gameId: string; questionId: string };
 
-    const votes = rawVotes.filter(
-      (vote) => vote?.gameId && vote?.questionId,
-    ) as Array<{ gameId: string; questionId: string }>;
+    const body = request.body as unknown;
+    const rawVotes = Array.isArray((body as { votes?: unknown }).votes)
+      ? (body as { votes: unknown[] }).votes
+      : [body];
+
+    const votes = rawVotes.filter((vote): vote is VoteRef => {
+      if (!vote || typeof vote !== 'object') return false;
+      const candidate = vote as Record<string, unknown>;
+      return (
+        typeof candidate.gameId === 'string' &&
+        typeof candidate.questionId === 'string'
+      );
+    });
 
     if (!votes.length) {
       return true;

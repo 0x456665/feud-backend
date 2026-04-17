@@ -45,7 +45,10 @@ export class QuestionService {
       where: { game_code: gameCode.toUpperCase() },
     });
     if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
-    if (game.play_state === PlayState.IN_PROGRESS || game.play_state === PlayState.FINISHED) {
+    if (
+      game.play_state === PlayState.IN_PROGRESS ||
+      game.play_state === PlayState.FINISHED
+    ) {
       throw new BadRequestException(
         'Questions cannot be modified once the game has started',
       );
@@ -59,7 +62,10 @@ export class QuestionService {
    * Adds a single question + its options to an existing game.
    * Transaction-wrapped to keep the question and options in sync.
    */
-  async addQuestion(gameCode: string, dto: CreateQuestionDto): Promise<Question> {
+  async addQuestion(
+    gameCode: string,
+    dto: CreateQuestionDto,
+  ): Promise<Question> {
     const game = await this.getEditableGame(gameCode);
 
     return this.dataSource.transaction(async (manager) => {

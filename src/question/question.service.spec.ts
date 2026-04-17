@@ -7,24 +7,49 @@ import { QuestionService } from './question.service';
 import { Question } from './entities/question.entity';
 import { Option } from './entities/option.entity';
 import { Game } from '../game/entities/game.entity';
-import { PlayState, VotingState } from '../common/enums/game.enums';
+import { PlayState } from '../common/enums/game.enums';
 
-const mockRepo = () => ({
+const mockRepo = <T>() => ({
   findOne: jest.fn(),
   find: jest.fn(),
   save: jest.fn(),
-  create: jest.fn((_, data) => data),
+  create: jest
+    .fn<T, [unknown, T]>()
+    .mockImplementation((_entity: unknown, data: T) => data),
 });
 
 const mockDataSource = () => ({
-  transaction: jest.fn((cb: (manager: any) => Promise<any>) =>
-    cb({
-      create: (_: any, data: any) => ({ ...data }),
-      save: jest.fn((_, data) => Promise.resolve({ id: 'new-id', ...data })),
-      findOne: jest.fn((_: any, opts: any) =>
-        Promise.resolve({ id: 'new-id', options: [] }),
-      ),
-    }),
+  transaction: jest.fn(
+    (
+      cb: (manager: {
+        create: (
+          entity: unknown,
+          data: Record<string, unknown>,
+        ) => Record<string, unknown>;
+        save: jest.Mock<
+          Promise<Record<string, unknown>>,
+          [unknown, Record<string, unknown>]
+        >;
+        findOne: jest.Mock<Promise<unknown>, [unknown, unknown]>;
+      }) => Promise<unknown>,
+    ) =>
+      cb({
+        create: (_entity: unknown, data: Record<string, unknown>) => ({
+          ...data,
+        }),
+        save: jest.fn((_: unknown, data: Record<string, unknown>) =>
+          Promise.resolve({
+            id: 'new-id',
+            ...data,
+          }),
+        ),
+        findOne: jest.fn(() =>
+          Promise.resolve({
+            id: 'new-id',
+            options: [],
+          }),
+        ),
+      }),
   ),
 });
 
@@ -32,7 +57,6 @@ describe('QuestionService', () => {
   let service: QuestionService;
   let gameRepo: ReturnType<typeof mockRepo>;
   let questionRepo: ReturnType<typeof mockRepo>;
-  let optionRepo: ReturnType<typeof mockRepo>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -48,7 +72,6 @@ describe('QuestionService', () => {
     service = module.get<QuestionService>(QuestionService);
     gameRepo = module.get(getRepositoryToken(Game));
     questionRepo = module.get(getRepositoryToken(Question));
-    optionRepo = module.get(getRepositoryToken(Option));
   });
 
   it('should be defined', () => {
@@ -74,7 +97,10 @@ describe('QuestionService', () => {
     });
 
     it('adds a question and returns it with options', async () => {
-      gameRepo.findOne.mockResolvedValue({ id: 'g1', play_state: PlayState.LOBBY });
+      gameRepo.findOne.mockResolvedValue({
+        id: 'g1',
+        play_state: PlayState.LOBBY,
+      });
       const result = await service.addQuestion('FEUD4X', {
         question: 'Name a fruit',
         options: ['Apple', 'Banana'],
@@ -85,7 +111,10 @@ describe('QuestionService', () => {
 
   describe('addOption()', () => {
     it('throws if question does not belong to game', async () => {
-      gameRepo.findOne.mockResolvedValue({ id: 'g1', play_state: PlayState.LOBBY });
+      gameRepo.findOne.mockResolvedValue({
+        id: 'g1',
+        play_state: PlayState.LOBBY,
+      });
       questionRepo.findOne.mockResolvedValue(null);
       await expect(
         service.addOption('FEUD4X', 'q-uuid', { option_text: 'Mango' }),

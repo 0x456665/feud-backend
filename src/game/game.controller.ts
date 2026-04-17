@@ -81,7 +81,7 @@ export class GameController {
   @Get('admin/games/:gameCode/survey-voters')
   @UseGuards(AdminGuard)
   async getSurveyVoterCount(@Param('gameCode') gameCode: string) {
-    return this.gameService.getSurveyVoterCount(gameCode);
+    return await this.gameService.getSurveyVoterCount(gameCode);
   }
 
   /**
@@ -187,7 +187,9 @@ export class GameController {
    * without replaying the full SSE event history.
    */
   @Get('games/:gameCode/board')
-  async getBoardSnapshot(@Param('gameCode') gameCode: string): Promise<BoardSnapshot> {
+  async getBoardSnapshot(
+    @Param('gameCode') gameCode: string,
+  ): Promise<BoardSnapshot> {
     return this.gameService.getBoardSnapshot(gameCode);
   }
 }

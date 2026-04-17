@@ -36,9 +36,7 @@ export class AdminGuard implements CanActivate {
     // Extract the admin code from the custom header
     const rawCode = request.headers['x-admin-code'];
     if (!rawCode || typeof rawCode !== 'string' || rawCode.trim() === '') {
-      throw new UnauthorizedException(
-        'Missing X-Admin-Code header',
-      );
+      throw new UnauthorizedException('Missing X-Admin-Code header');
     }
 
     // Resolve the game code from the route param

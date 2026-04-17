@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Request } from 'express';
@@ -41,7 +37,15 @@ export class PlayersService {
   ): Promise<PlayerSession> {
     const game = await this.gameRepo.findOne({
       where: { game_code: gameCode.toUpperCase() },
-      select: ['id', 'game_code', 'game_name', 'team_a_name', 'team_b_name', 'play_state', 'voting_state'],
+      select: [
+        'id',
+        'game_code',
+        'game_name',
+        'team_a_name',
+        'team_b_name',
+        'play_state',
+        'voting_state',
+      ],
     });
     if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
 

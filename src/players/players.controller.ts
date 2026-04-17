@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PlayersService } from './players.service';
 
@@ -37,8 +31,16 @@ export class PlayersController {
     @Res({ passthrough: true }) res: Response,
   ) {
     // Reuse existing voter_token if present; generate a new one via UUID otherwise
-    let token: string | undefined = req.cookies?.voter_token;
-    if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
+    let token: string | undefined;
+    const cookieToken = (req.cookies as Record<string, unknown> | undefined)
+      ?.voter_token;
+    if (
+      typeof cookieToken === 'string' &&
+      /^[0-9a-f-]{36}$/i.test(cookieToken)
+    ) {
+      token = cookieToken;
+    }
+    if (!token) {
       const { randomUUID } = await import('crypto');
       token = randomUUID();
     }

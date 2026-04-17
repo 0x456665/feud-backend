@@ -12,8 +12,7 @@ export function computeStdDev(votes: number[]): number {
 
   const n = votes.length;
   const mean = votes.reduce((sum, v) => sum + v, 0) / n;
-  const variance =
-    votes.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / n;
+  const variance = votes.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / n;
 
   return Math.round(Math.sqrt(variance) * 10000) / 10000;
 }

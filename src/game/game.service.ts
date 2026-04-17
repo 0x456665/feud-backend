@@ -244,7 +244,9 @@ export class GameService {
     });
   }
 
-  async getSurveyVoterCount(gameCode: string): Promise<{ totalVoters: number }> {
+  async getSurveyVoterCount(
+    gameCode: string,
+  ): Promise<{ totalVoters: number }> {
     const game = await this.getGame(gameCode);
 
     const result = await this.voterRepo
@@ -253,7 +255,10 @@ export class GameService {
       .where('voter.game_id = :gameId', { gameId: game.id })
       .getRawOne<{ count: string }>();
 
-    return { totalVoters: Number(result?.count ?? '0') };
+    const countValue = result?.count;
+    const totalVoters = typeof countValue === 'string' ? Number(countValue) : 0;
+
+    return { totalVoters };
   }
 
   // ── Admin: Voting State ───────────────────────────────────────────────────
