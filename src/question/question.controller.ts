@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Param,
   Body,
   UseGuards,
@@ -14,6 +15,8 @@ import {
   CreateQuestionDto,
   CreateOptionDto,
   BulkImportQuestionsDto,
+  UpdateQuestionDto,
+  UpdateOptionDto,
 } from './dto/question.dto';
 
 /**
@@ -75,5 +78,29 @@ export class QuestionController {
     @Body() dto: CreateOptionDto,
   ) {
     return this.questionService.addOption(gameCode, questionId, dto);
+  }
+
+  @Patch('questions/:questionId')
+  async updateQuestion(
+    @Param('gameCode') gameCode: string,
+    @Param('questionId') questionId: string,
+    @Body() dto: UpdateQuestionDto,
+  ) {
+    return this.questionService.updateQuestion(gameCode, questionId, dto);
+  }
+
+  @Patch('questions/:questionId/options/:optionId')
+  async updateOption(
+    @Param('gameCode') gameCode: string,
+    @Param('questionId') questionId: string,
+    @Param('optionId') optionId: string,
+    @Body() dto: UpdateOptionDto,
+  ) {
+    return this.questionService.updateOption(
+      gameCode,
+      questionId,
+      optionId,
+      dto,
+    );
   }
 }

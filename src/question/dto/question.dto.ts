@@ -46,6 +46,27 @@ export class CreateOptionDto {
   option_text!: string;
 }
 
+export class UpdateOptionDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  option_text!: string;
+}
+
+export class UpdateQuestionDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  question?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(15)
+  number_of_options?: number;
+}
+
 /** DTO for a single question entry in the bulk import body. */
 export class ImportQuestionDto {
   @IsString()

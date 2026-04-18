@@ -164,7 +164,63 @@ export class QuestionService {
     return this.optionRepo.save(option);
   }
 
-  // ── List Questions ────────────────────────────────────────────────────────
+  async updateQuestion(
+    gameCode: string,
+    questionId: string,
+    dto: UpdateQuestionDto,
+  ): Promise<Question> {
+    const game = await this.getEditableGame(gameCode);
+
+    const question = await this.questionRepo.findOne({
+      where: { id: questionId, game_id: game.id },
+    });
+    if (!question) {
+      throw new NotFoundException(
+        `Question "${questionId}" not found in game "${gameCode}"`,
+      );
+    }
+
+    if (dto.question !== undefined) {
+      question.question = dto.question;
+    }
+    if (dto.number_of_options !== undefined) {
+      question.number_of_options = dto.number_of_options;
+    }
+
+    return this.questionRepo.save(question);
+  }
+
+  async updateOption(
+    gameCode: string,
+    questionId: string,
+    optionId: string,
+    dto: UpdateOptionDto,
+  ): Promise<Option> {
+    const game = await this.getEditableGame(gameCode);
+
+    const question = await this.questionRepo.findOne({
+      where: { id: questionId, game_id: game.id },
+    });
+    if (!question) {
+      throw new NotFoundException(
+        `Question "${questionId}" not found in game "${gameCode}"`,
+      );
+    }
+
+    const option = await this.optionRepo.findOne({
+      where: { id: optionId, question_id: question.id },
+    });
+    if (!option) {
+      throw new NotFoundException(
+        `Option "${optionId}" not found for question "${questionId}"`,
+      );
+    }
+
+    option.option_text = dto.option_text;
+    return this.optionRepo.save(option);
+  }
+
+  // ── List Questions ────────────────────────────────────────────────────────────────
 
   /**
    * Lists all questions for a game with their options and vote/rank stats.
