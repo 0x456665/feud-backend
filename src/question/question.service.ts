@@ -15,6 +15,8 @@ import {
   CreateQuestionDto,
   CreateOptionDto,
   BulkImportQuestionsDto,
+  UpdateOptionDto,
+  UpdateQuestionDto,
 } from './dto/question.dto';
 
 @Injectable()
