@@ -15,7 +15,9 @@ const mockRepo = () => ({
   findOne: jest.fn<Promise<unknown | null>, [unknown]>(),
   find: jest.fn<Promise<unknown[]>, [unknown]>(),
   save: jest.fn<Promise<unknown>, [unknown]>(),
-  create: jest.fn<unknown, [unknown]>().mockImplementation((data: unknown) => data),
+  create: jest
+    .fn<unknown, [unknown]>()
+    .mockImplementation((data: unknown) => data),
   increment: jest.fn(),
 });
 

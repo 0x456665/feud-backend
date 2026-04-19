@@ -26,6 +26,7 @@ import {
 import { computeStdDev, computeOptionPoints } from '../common/utils/stats.util';
 import { GameEventType } from '../events/dto/game-event.dto';
 import { CreateGameDto } from './dto/create-game.dto';
+import { UpdateGameDto } from './dto/update-game.dto';
 import { UpdateVotingStateDto } from './dto/update-voting-state.dto';
 import {
   AddScoreDto,
@@ -38,6 +39,25 @@ const BCRYPT_ROUNDS = 12;
 
 /** Maximum game_code generation retries before giving up. */
 const CODE_GEN_RETRIES = 5;
+
+type GameSeedQuestion = {
+  question: string;
+  number_of_options: number;
+  options: string[];
+};
+
+type GameSeed = {
+  game_name: string;
+  team_a_name?: string;
+  team_b_name?: string;
+  num_rounds: number;
+  questions: GameSeedQuestion[];
+};
+
+type GameCreationResult = {
+  game: Game;
+  rawAdminCode: string;
+};
 
 export interface BoardSnapshot {
   id: string;
@@ -111,79 +131,82 @@ export class GameService {
 
   // ── Game Creation ─────────────────────────────────────────────────────────
 
-  /**
-   * Creates a new game with all its initial questions and options.
-   * Wrapped in a DB transaction to guarantee atomicity.
-   *
-   * The raw admin code is returned ONCE in the response — it is never
-   * retrievable again.  The caller must store it securely.
-   *
-   * @returns Game record + raw admin code (only time it's exposed)
-   */
-  async createGame(
-    dto: CreateGameDto,
-  ): Promise<{ game: Game; rawAdminCode: string }> {
-    if (dto.num_rounds > dto.questions.length) {
+  private assertRoundCount(numRounds: number, questionCount: number): void {
+    if (numRounds > questionCount) {
       throw new BadRequestException(
-        `num_rounds (${dto.num_rounds}) cannot exceed the number of questions provided (${dto.questions.length})`,
+        `num_rounds (${numRounds}) cannot exceed the number of questions provided (${questionCount})`,
       );
     }
+  }
 
-    const rawAdminCode = generateAdminCode();
-    const hashedAdminCode = await bcrypt.hash(rawAdminCode, BCRYPT_ROUNDS);
-
-    // Retry code generation on the rare chance of a collision
-    let gameCode = '';
-    for (let attempt = 0; attempt < CODE_GEN_RETRIES; attempt++) {
+  private async generateUniqueGameCode(): Promise<string> {
+    for (let attempt = 0; attempt < CODE_GEN_RETRIES; attempt += 1) {
       const candidate = generateGameCode();
       const existing = await this.gameRepo.findOne({
         where: { game_code: candidate },
         select: ['id'],
       });
       if (!existing) {
-        gameCode = candidate;
-        break;
+        return candidate;
       }
     }
-    if (!gameCode) {
-      throw new ConflictException(
-        'Unable to generate a unique game code — please try again',
-      );
+
+    throw new ConflictException(
+      'Unable to generate a unique game code — please try again',
+    );
+  }
+
+  private buildDuplicateGameName(gameName: string): string {
+    const suffix = ' (Copy)';
+    if (gameName.length + suffix.length <= 100) {
+      return `${gameName}${suffix}`;
     }
 
-    // All inserts in a single transaction: Game, Questions, Options
+    return `${gameName.slice(0, 100 - suffix.length).trimEnd()}${suffix}`;
+  }
+
+  private async createGameRecord(seed: GameSeed): Promise<GameCreationResult> {
+    this.assertRoundCount(seed.num_rounds, seed.questions.length);
+
+    const rawAdminCode = generateAdminCode();
+    const hashedAdminCode = await bcrypt.hash(rawAdminCode, BCRYPT_ROUNDS);
+    const gameCode = await this.generateUniqueGameCode();
+
     return this.dataSource.transaction(async (manager) => {
       const game = manager.create(Game, {
-        game_name: dto.game_name,
+        game_name: seed.game_name,
         game_code: gameCode,
         admin_code: hashedAdminCode,
-        team_a_name: dto.team_a_name ?? 'Team A',
-        team_b_name: dto.team_b_name ?? 'Team B',
-        num_rounds: dto.num_rounds,
+        team_a_name: seed.team_a_name ?? 'Team A',
+        team_b_name: seed.team_b_name ?? 'Team B',
+        num_rounds: seed.num_rounds,
         voting_state: VotingState.OPEN,
         play_state: PlayState.LOBBY,
       });
       const savedGame = await manager.save(Game, game);
 
-      for (const qDto of dto.questions) {
+      for (const questionSeed of seed.questions) {
         const question = manager.create(Question, {
           game_id: savedGame.id,
-          question: qDto.question,
-          number_of_options: 6, // Family Feud standard
+          question: questionSeed.question,
+          number_of_options: questionSeed.number_of_options,
+          std_dev: null,
+          display_order: null,
         });
         const savedQuestion = await manager.save(Question, question);
 
-        const options = qDto.options.map((optText) =>
+        const options = questionSeed.options.map((optionText) =>
           manager.create(Option, {
             question_id: savedQuestion.id,
-            option_text: optText,
+            option_text: optionText,
             votes: 0,
+            rank: null,
+            points: null,
           }),
         );
         await manager.save(Option, options);
       }
 
-      // Initialise the gameplay log row for this game
       const log = manager.create(GameplayLog, {
         game_id: savedGame.id,
         team_a_score: 0,
@@ -194,9 +217,71 @@ export class GameService {
       });
       await manager.save(GameplayLog, log);
 
-      this.logger.log(`Game created: ${savedGame.game_code}`);
       return { game: savedGame, rawAdminCode };
     });
+  }
+
+  /**
+   * Creates a new game with all its initial questions and options.
+   * Wrapped in a DB transaction to guarantee atomicity.
+   *
+   * The raw admin code is returned ONCE in the response — it is never
+   * retrievable again.  The caller must store it securely.
+   *
+   * @returns Game record + raw admin code (only time it's exposed)
+   */
+  async createGame(dto: CreateGameDto): Promise<GameCreationResult> {
+    const result = await this.createGameRecord({
+      game_name: dto.game_name,
+      team_a_name: dto.team_a_name,
+      team_b_name: dto.team_b_name,
+      num_rounds: dto.num_rounds,
+      questions: dto.questions.map((question) => ({
+        question: question.question,
+        number_of_options: 6,
+        options: question.options,
+      })),
+    });
+
+    this.logger.log(`Game created: ${result.game.game_code}`);
+    return result;
+  }
+
+  async duplicateGame(
+    gameCode: string,
+    overrides: UpdateGameDto = {},
+  ): Promise<GameCreationResult> {
+    const sourceGame = await this.gameRepo.findOne({
+      where: { game_code: gameCode.toUpperCase() },
+      relations: ['questions', 'questions.options'],
+    });
+    if (!sourceGame) {
+      throw new NotFoundException(`Game "${gameCode}" not found`);
+    }
+
+    const questions = [...sourceGame.questions].sort(
+      (left, right) => left.created_at.getTime() - right.created_at.getTime(),
+    );
+    const duplicateGameName =
+      overrides.game_name ?? this.buildDuplicateGameName(sourceGame.game_name);
+
+    const result = await this.createGameRecord({
+      game_name: duplicateGameName,
+      team_a_name: overrides.team_a_name ?? sourceGame.team_a_name,
+      team_b_name: overrides.team_b_name ?? sourceGame.team_b_name,
+      num_rounds: sourceGame.num_rounds,
+      questions: questions.map((question) => ({
+        question: question.question,
+        number_of_options: question.number_of_options,
+        options: question.options.map((option) => option.option_text),
+      })),
+    });
+
+    this.logger.log(
+      `Game duplicated: ${sourceGame.game_code} -> ${result.game.game_code}`,
+    );
+
+    return result;
   }
 
   // ── Admin: Game Info ──────────────────────────────────────────────────────
@@ -209,6 +294,34 @@ export class GameService {
     });
     if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
     return game;
+  }
+
+  async updateGame(
+    gameCode: string,
+    dto: { game_name?: string; team_a_name?: string; team_b_name?: string },
+  ): Promise<Game> {
+    const game = await this.gameRepo.findOne({
+      where: { game_code: gameCode.toUpperCase() },
+    });
+    if (!game) throw new NotFoundException(`Game "${gameCode}" not found`);
+
+    if (game.play_state !== PlayState.LOBBY) {
+      throw new BadRequestException(
+        'Game details can only be changed before the live game starts',
+      );
+    }
+
+    if (dto.game_name !== undefined) {
+      game.game_name = dto.game_name.trim();
+    }
+    if (dto.team_a_name !== undefined) {
+      game.team_a_name = dto.team_a_name.trim();
+    }
+    if (dto.team_b_name !== undefined) {
+      game.team_b_name = dto.team_b_name.trim();
+    }
+
+    return this.gameRepo.save(game);
   }
 
   /**
@@ -316,6 +429,12 @@ export class GameService {
         (a, b) => b.votes - a.votes,
       );
       const topOptions = sortedOptions.slice(0, question.number_of_options);
+
+      await this.optionRepo.update(
+        { question_id: question.id },
+        { rank: null, points: null },
+      );
+
       const totalVotes = topOptions.reduce((sum, o) => sum + o.votes, 0);
       const voteCounts = topOptions.map((o) => o.votes);
       const points = computeOptionPoints(voteCounts, totalVotes);
@@ -480,6 +599,12 @@ export class GameService {
 
     if (log.options_revealed.includes(dto.optionId)) {
       throw new BadRequestException('This option has already been revealed');
+    }
+
+    if (option.rank === null) {
+      throw new BadRequestException(
+        'Only ranked top answers can be revealed on the board',
+      );
     }
 
     // Add to revealed list and persist
@@ -695,7 +820,10 @@ export class GameService {
             total_options:
               rankedOptionCount > 0
                 ? rankedOptionCount
-                : currentQuestion.number_of_options,
+                : Math.min(
+                    currentQuestion.number_of_options,
+                    currentQuestionOptions.length,
+                  ),
           }
         : null,
       revealed_options: revealedOptions,

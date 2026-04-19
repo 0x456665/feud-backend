@@ -118,6 +118,59 @@ describe('GameService', () => {
     });
   });
 
+  describe('duplicateGame()', () => {
+    it('clones a game into a fresh lobby copy', async () => {
+      gameRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'source-id',
+          game_code: 'FEUD4X',
+          game_name: 'Office Feud',
+          team_a_name: 'Alpha',
+          team_b_name: 'Beta',
+          num_rounds: 2,
+          questions: [
+            {
+              question: 'Name an office snack',
+              number_of_options: 4,
+              created_at: new Date('2026-01-01T00:00:00Z'),
+              options: [{ option_text: 'Chips' }, { option_text: 'Cookies' }],
+            },
+            {
+              question: 'Name a meeting excuse',
+              number_of_options: 3,
+              created_at: new Date('2026-01-02T00:00:00Z'),
+              options: [
+                { option_text: 'Traffic' },
+                { option_text: 'Wi-Fi issues' },
+              ],
+            },
+          ],
+        })
+        .mockResolvedValueOnce(null);
+
+      const result = await service.duplicateGame('FEUD4X', {
+        game_name: 'Office Feud Remix',
+        team_a_name: 'Gamma',
+        team_b_name: 'Delta',
+      });
+
+      expect(result).toHaveProperty('rawAdminCode');
+      expect(result.game.game_name).toBe('Office Feud Remix');
+      expect(result.game.team_a_name).toBe('Gamma');
+      expect(result.game.team_b_name).toBe('Delta');
+      expect(result.game.num_rounds).toBe(2);
+      expect(dataSource.transaction).toHaveBeenCalled();
+    });
+
+    it('throws when the source game does not exist', async () => {
+      gameRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.duplicateGame('NOPE12')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   // ── updateVotingState ─────────────────────────────────────────────────────
 
   describe('updateVotingState()', () => {

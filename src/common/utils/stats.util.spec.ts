@@ -21,8 +21,13 @@ describe('computeStdDev', () => {
 });
 
 describe('computeOptionPoints', () => {
-  it('returns 0s when totalVotes is 0', () => {
-    expect(computeOptionPoints([0, 0, 0], 0)).toEqual([0, 0, 0]);
+  it('distributes points when totalVotes is 0 while preserving descending order', () => {
+    const points = computeOptionPoints([0, 0, 0], 0);
+
+    expect(points).toEqual([35, 33, 32]);
+    expect(points.reduce((sum, value) => sum + value, 0)).toBe(100);
+    expect(points[0]).toBeGreaterThan(points[1]);
+    expect(points[1]).toBeGreaterThan(points[2]);
   });
 
   it('computes proportional points summing to ~100', () => {
@@ -34,6 +39,25 @@ describe('computeOptionPoints', () => {
   it('rounds to nearest integer', () => {
     // 1/3 = 33.33 → 33, 1/3 = 33.33 → 33, 1/3 = 33.33 → 33
     const points = computeOptionPoints([1, 1, 1], 3);
-    expect(points).toEqual([33, 33, 33]);
+    expect(points.reduce((sum, value) => sum + value, 0)).toBe(100);
+    expect(points[0]).toBeGreaterThan(points[1]);
+    expect(points[1]).toBeGreaterThan(points[2]);
+  });
+
+  it('pads zero-vote slots and recalculates remaining points proportionally', () => {
+    const points = computeOptionPoints([12, 5, 2, 0, 0, 0], 19);
+
+    expect(points).toEqual([54, 22, 9, 5, 5, 5]);
+    expect(points.reduce((sum, value) => sum + value, 0)).toBe(100);
+    expect(points[0]).toBeGreaterThan(points[1]);
+    expect(points[1]).toBeGreaterThan(points[2]);
+  });
+
+  it('ensures the lowest non-zero option stays above zero-vote minimum', () => {
+    const points = computeOptionPoints([99, 1, 0, 0, 0, 0], 100);
+
+    expect(points).toEqual([74, 6, 5, 5, 5, 5]);
+    expect(points.reduce((sum, value) => sum + value, 0)).toBe(100);
+    expect(points[1]).toBeGreaterThan(points[2]);
   });
 });

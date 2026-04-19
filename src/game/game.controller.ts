@@ -13,6 +13,7 @@ import { Response } from 'express';
 import { GameService, BoardSnapshot } from './game.service';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CreateGameDto } from './dto/create-game.dto';
+import { UpdateGameDto } from './dto/update-game.dto';
 import { UpdateVotingStateDto } from './dto/update-voting-state.dto';
 import {
   AddScoreDto,
@@ -31,6 +32,28 @@ import {
 export class GameController {
   constructor(private readonly gameService: GameService) {}
 
+  private buildAdminGameResponse(
+    game: {
+      game_code: string;
+      id: string;
+      team_a_name: string;
+      team_b_name: string;
+      num_rounds: number;
+    },
+    rawAdminCode: string,
+    message: string,
+  ) {
+    return {
+      message,
+      game_code: game.game_code,
+      admin_code: rawAdminCode,
+      game_id: game.id,
+      team_a_name: game.team_a_name,
+      team_b_name: game.team_b_name,
+      num_rounds: game.num_rounds,
+    };
+  }
+
   // ── Admin: Game Management ────────────────────────────────────────────────
 
   /**
@@ -43,16 +66,11 @@ export class GameController {
   @HttpCode(HttpStatus.CREATED)
   async createGame(@Body() dto: CreateGameDto) {
     const { game, rawAdminCode } = await this.gameService.createGame(dto);
-    return {
-      message:
-        'Game created. Save the admin_code — it will not be shown again.',
-      game_code: game.game_code,
-      admin_code: rawAdminCode,
-      game_id: game.id,
-      team_a_name: game.team_a_name,
-      team_b_name: game.team_b_name,
-      num_rounds: game.num_rounds,
-    };
+    return this.buildAdminGameResponse(
+      game,
+      rawAdminCode,
+      'Game created. Save the admin_code — it will not be shown again.',
+    );
   }
 
   /**
@@ -63,6 +81,33 @@ export class GameController {
   @UseGuards(AdminGuard)
   async getGame(@Param('gameCode') gameCode: string) {
     return this.gameService.getGame(gameCode);
+  }
+
+  @Post('admin/games/:gameCode/duplicate')
+  @UseGuards(AdminGuard)
+  @HttpCode(HttpStatus.CREATED)
+  async duplicateGame(
+    @Param('gameCode') gameCode: string,
+    @Body() dto: UpdateGameDto,
+  ) {
+    const { game, rawAdminCode } = await this.gameService.duplicateGame(
+      gameCode,
+      dto,
+    );
+    return this.buildAdminGameResponse(
+      game,
+      rawAdminCode,
+      'Game duplicated. Save the admin_code — it will not be shown again.',
+    );
+  }
+
+  @Patch('admin/games/:gameCode')
+  @UseGuards(AdminGuard)
+  async updateGame(
+    @Param('gameCode') gameCode: string,
+    @Body() dto: UpdateGameDto,
+  ) {
+    return this.gameService.updateGame(gameCode, dto);
   }
 
   /**
