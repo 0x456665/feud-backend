@@ -526,13 +526,15 @@ export class GameService {
     const { game, log } = await this.getActiveGame(gameCode);
 
     // Persist Gameplay record for the completed question if one was active
+    // Capture the ID before closeCurrentRound nulls it out
+    const previousQuestionId = log.current_question_id;
     if (log.current_question_id) {
       await this.closeCurrentRound(log, game.id);
     }
 
     // Find the next question in sequence
-    const nextOrder = log.current_question_id
-      ? await this.getNextDisplayOrder(game.id, log.current_question_id)
+    const nextOrder = previousQuestionId
+      ? await this.getNextDisplayOrder(game.id, previousQuestionId)
       : 1;
 
     const nextQuestion = await this.questionRepo.findOne({
