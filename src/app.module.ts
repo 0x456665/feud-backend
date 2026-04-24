@@ -11,6 +11,7 @@ import { VotingModule } from './voting/voting.module';
 import { PlayersModule } from './players/players.module';
 import { EventsModule } from './events/events.module';
 import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 /**
  * AppModule — root module that wires together all feature modules.
@@ -77,6 +78,7 @@ import { AppController } from './app.controller';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    AppService,
   ],
   controllers: [AppController],
 })
