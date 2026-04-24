@@ -10,6 +10,7 @@ import { QuestionModule } from './question/question.module';
 import { VotingModule } from './voting/voting.module';
 import { PlayersModule } from './players/players.module';
 import { EventsModule } from './events/events.module';
+import { AppController } from './app.controller';
 
 /**
  * AppModule — root module that wires together all feature modules.
@@ -77,5 +78,6 @@ import { EventsModule } from './events/events.module';
       useClass: ThrottlerGuard,
     },
   ],
+  controllers: [AppController],
 })
 export class AppModule {}
